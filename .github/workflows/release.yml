@@ -4,8 +4,8 @@ on:
   workflow_dispatch:
     inputs:
       commit:
-        description: "Commit (e.g., 52f0348)"
-        default: "master"
+        description: "Core v1.12.0 with asnlookup"
+        default: "v1.12.0"
 
 jobs:
   release:
@@ -15,42 +15,41 @@ jobs:
       contents: write
     steps:
       - name: Check out code
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683  # v4.2.2
+        uses: actions/checkout@v4
         with:
           ref: ${{ github.event.inputs.commit }}
+
       - name: Set up info
+        id: info
         run: |
-          set -x -e
+          set -e
           VERSION=$(make -f Makefile.release version)
-          COMMIT=$(git rev-parse --quiet --verify ${{ github.event.inputs.commit }})
-          if [[ "$(git tag -l v${VERSION})" == "v${VERSION}" ]]; then
-            echo "v${VERSION} already released"
+          COMMIT=$(git rev-parse --verify ${{ github.event.inputs.commit }})
+          
+          if git tag -l "v${VERSION}" | grep -q "v${VERSION}"; then
+            echo "v${VERSION} already exists"
             exit 1
           fi
+
           echo "commit=${COMMIT}" >> $GITHUB_OUTPUT
           echo "version=${VERSION}" >> $GITHUB_OUTPUT
-        id: info
+
       - name: Build release binary
         run: make -f Makefile.release release
-      - name: Build release binary sha256
-        run: (cd release; for asset in `ls -A *tgz`; do sha256sum $asset > $asset.sha256; done)
-      - name: Remove hidden section
-        run: sed '/+++/,//d' notes/coredns-${{ steps.info.outputs.version}}.md > release.md
-      - name: Log release info
-        run: |
-          set -x -e
-          git log -1
-          echo ${{ steps.info.outputs.commit }}
-          echo ${{ steps.info.outputs.version }}
-          cat release.md
-          sha256sum release/*.tgz
+
+      - name: Generate SHA256
+        run: (cd release; for asset in *tgz; do sha256sum "$asset" > "$asset.sha256"; done)
+
+      - name: Prepare release notes
+        run: sed '/+++/,//d' notes/coredns-${{ steps.info.outputs.version }}.md > release.md
+
       - name: Draft release
-        uses: softprops/action-gh-release@01570a1f39cb168c169c802c3bceb9e93fb10974  # v2.1.0
+        uses: softprops/action-gh-release@v2
         with:
-          body_path: release.md
-          name: v${{ steps.info.outputs.version }}
           tag_name: v${{ steps.info.outputs.version }}
+          name: v${{ steps.info.outputs.version }}
           target_commitish: ${{ steps.info.outputs.commit }}
+          body_path: release.md
           files: |
             release/*.tgz
             release/*.tgz.sha256
